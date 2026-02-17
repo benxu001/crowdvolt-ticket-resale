@@ -1,8 +1,9 @@
 """
 CrowdVolt NYC Event Discovery Script
 
-Uses Playwright to load the CrowdVolt homepage with the New York filter,
-scrolls to load all events, and upserts them into Supabase.
+Fetches event slugs from the CrowdVolt sitemap, then visits each event
+page to extract metadata from the Next.js RSC payload. Filters for
+New York events and upserts them into Supabase.
 
 Run daily via GitHub Actions or manually:
     python scraper/discover.py
@@ -10,144 +11,164 @@ Run daily via GitHub Actions or manually:
 
 import os
 import re
-import json
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from playwright.sync_api import sync_playwright
+import requests
 from supabase import create_client
 
-CROWDVOLT_URL = "https://www.crowdvolt.com/"
+SITEMAP_URL = "https://www.crowdvolt.com/sitemap.xml"
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
+HEADERS = {
+    "User-Agent": "CrowdVoltNYCTracker/1.0 (personal portfolio project)",
+    "Accept": "text/html,application/xhtml+xml,application/xml",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
-def discover_events():
-    """Load CrowdVolt homepage, select NY filter, scroll and extract all events."""
-    events = []
+REQUEST_DELAY = 1.0  # seconds between requests
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(
-            user_agent="CrowdVoltNYCTracker/1.0 (personal portfolio project)"
-        )
-
-        print("Navigating to CrowdVolt...")
-        page.goto(CROWDVOLT_URL, wait_until="domcontentloaded", timeout=60000)
-        # Wait for event cards to appear on the page
-        page.wait_for_selector('a[href^="/event/"]', timeout=30000)
-
-        # The homepage shows "Browse Events in New York" with city filters.
-        # "New York" appears to be the default selection (underlined in screenshot).
-        # Click it explicitly to be safe.
-        try:
-            ny_filter = page.locator("text=New York").first
-            ny_filter.click()
-            page.wait_for_timeout(2000)
-        except Exception as e:
-            print(f"Warning: Could not click New York filter: {e}")
-            print("Proceeding with default view...")
-
-        # Scroll down to load all events (infinite scroll)
-        print("Scrolling to load all events...")
-        prev_count = 0
-        stale_rounds = 0
-        max_stale_rounds = 5
-
-        while stale_rounds < max_stale_rounds:
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(1500)
-
-            # Count current event cards
-            cards = page.locator('a[href^="/event/"]').all()
-            current_count = len(cards)
-            print(f"  Found {current_count} event links...")
-
-            if current_count == prev_count:
-                stale_rounds += 1
-            else:
-                stale_rounds = 0
-            prev_count = current_count
-
-        print(f"Finished scrolling. Total event links found: {prev_count}")
-
-        # Extract event data from cards
-        cards = page.locator('a[href^="/event/"]').all()
-        seen_slugs = set()
-
-        for card in cards:
-            try:
-                href = card.get_attribute("href")
-                if not href or "/event/" not in href:
-                    continue
-
-                slug = href.replace("/event/", "").strip("/")
-                if slug in seen_slugs:
-                    continue
-                seen_slugs.add(slug)
-
-                # Try to extract text content from the card
-                text = card.inner_text()
-                lines = [line.strip() for line in text.split("\n") if line.strip()]
-
-                # Parse card text - typical format from screenshot:
-                # "Bedouin"
-                # "Fri, February 20 • 10PM"
-                # "Capitale"
-                # "From $101"
-                name = lines[0] if len(lines) > 0 else slug
-                date_str = lines[1] if len(lines) > 1 else ""
-                venue = lines[2] if len(lines) > 2 else ""
-
-                # Parse the date string (e.g., "Fri, February 20 • 10PM")
-                event_date = parse_event_date(date_str)
-
-                events.append({
-                    "slug": slug,
-                    "name": name,
-                    "venue": venue,
-                    "event_date": event_date,
-                    "url": f"https://www.crowdvolt.com/event/{slug}",
-                })
-            except Exception as e:
-                print(f"  Warning: Failed to parse card: {e}")
-                continue
-
-        browser.close()
-
-    print(f"Extracted {len(events)} unique events")
-    return events
+# Patterns for escaped JSON in Next.js RSC payload
+# Data appears as: \"area_name\":\"New York\",\"name\":\"Artist\",...
+RE_AREA = re.compile(r'\\"area_name\\":\\"([^\\]+)\\"')
+RE_NAME = re.compile(r'\\"area_name\\":\\"[^\\]+\\",\\"name\\":\\"([^\\]+)\\"')
+RE_VENUE = re.compile(r'\\"venue\\":\\"([^\\]+)\\"')
+RE_DATE = re.compile(r'\\"date\\":\\"([^\\]+)\\"')
 
 
-def parse_event_date(date_str):
-    """Parse date string like 'Fri, February 20 • 10PM' into ISO format."""
+def fetch_event_slugs():
+    """Fetch all event slugs from the CrowdVolt sitemap."""
+    print(f"Fetching sitemap from {SITEMAP_URL}...")
+    resp = requests.get(SITEMAP_URL, headers=HEADERS, timeout=30)
+    resp.raise_for_status()
+
+    root = ET.fromstring(resp.content)
+    ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+    slugs = []
+    for url_elem in root.findall("s:url/s:loc", ns):
+        loc = url_elem.text
+        if loc and "/event/" in loc:
+            slug = loc.split("/event/")[-1].strip("/")
+            if slug:
+                slugs.append(slug)
+
+    print(f"Found {len(slugs)} event URLs in sitemap")
+    return slugs
+
+
+def extract_event_data(html):
+    """Extract event metadata from the Next.js RSC payload.
+
+    The RSC payload contains escaped JSON with event data like:
+    \\"area_name\\":\\"New York\\",\\"name\\":\\"Jamie Jones\\",...
+    """
+    area_match = RE_AREA.search(html)
+    name_match = RE_NAME.search(html)
+
+    area_name = area_match.group(1) if area_match else None
+    name = name_match.group(1) if name_match else None
+
+    # Get venue and date from <title> as primary source (clean, unescaped)
+    # Format: "Artist City tickets - Venue - Date | CrowdVolt"
+    title_match = re.search(r'<title>([^<]+)</title>', html)
+    title = title_match.group(1) if title_match else ""
+    venue = None
+    date_str = None
+
+    if " tickets - " in title:
+        after = title.split(" tickets - ", 1)[1]
+        parts = after.split(" - ")
+        venue = parts[0].strip()
+        if len(parts) >= 2:
+            date_str = parts[1].replace(" | CrowdVolt", "").strip()
+
+    # Fallback to RSC payload for venue/date
+    if not venue:
+        v = RE_VENUE.search(html)
+        if v:
+            venue = v.group(1)
+    if not date_str:
+        d = RE_DATE.search(html)
+        if d:
+            date_str = d.group(1)
+
+    # Fallback name from title
+    if not name and " tickets - " in title:
+        name = title.split(" tickets - ")[0].rsplit(" ", 1)[0]
+
+    return {
+        "area_name": area_name,
+        "name": name,
+        "venue": venue,
+        "date": date_str,
+    }
+
+
+def parse_display_date(date_str):
+    """Parse display date like 'Fri, February 20' into ISO format."""
     if not date_str:
         return None
 
     try:
-        # Remove day-of-week prefix and bullet separator
-        # "Fri, February 20 • 10PM" -> "February 20 10PM"
         cleaned = re.sub(r"^[A-Za-z]+,\s*", "", date_str)
         cleaned = cleaned.replace("•", "").strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
 
-        # Try parsing with time
-        # "February 20 10PM" or "February 20 10:00PM"
         for fmt in ["%B %d %I%p", "%B %d %I:%M%p", "%B %d"]:
             try:
                 dt = datetime.strptime(cleaned, fmt)
-                # Assume current year or next year if month has passed
-                now = datetime.now()
+                now = datetime.now(timezone.utc)
                 dt = dt.replace(year=now.year)
                 if dt.month < now.month:
                     dt = dt.replace(year=now.year + 1)
                 return dt.isoformat()
             except ValueError:
                 continue
-
-        print(f"  Warning: Could not parse date '{date_str}'")
-        return None
     except Exception:
-        return None
+        pass
+    return None
+
+
+def discover_events():
+    """Discover NYC events: sitemap -> fetch each page -> filter by area_name."""
+    slugs = fetch_event_slugs()
+
+    nyc_events = []
+    other_count = 0
+
+    for i, slug in enumerate(slugs):
+        url = f"https://www.crowdvolt.com/event/{slug}"
+        print(f"[{i + 1}/{len(slugs)}] {slug}...", end=" ")
+
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+            data = extract_event_data(resp.text)
+
+            if data["area_name"] == "New York":
+                event = {
+                    "slug": slug,
+                    "name": data["name"] or slug,
+                    "venue": data["venue"] or "",
+                    "event_date": parse_display_date(data["date"]),
+                    "url": url,
+                }
+                nyc_events.append(event)
+                print(f"NYC -> {data['name']} @ {data['venue']}")
+            else:
+                other_count += 1
+                print(f"skip ({data['area_name'] or 'unknown'})")
+        except requests.RequestException as e:
+            print(f"HTTP error: {e}")
+            other_count += 1
+
+        if i < len(slugs) - 1:
+            time.sleep(REQUEST_DELAY)
+
+    print(f"\nDiscovered {len(nyc_events)} NYC events ({other_count} other cities skipped)")
+    return nyc_events
 
 
 def upsert_to_supabase(events):

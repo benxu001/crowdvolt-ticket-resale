@@ -23,8 +23,5 @@ jobs:
       - name: Install dependencies
         run: pip install -r scraper/requirements.txt
 
-      - name: Install Playwright browsers
-        run: playwright install chromium --with-deps
-
       - name: Run event discovery
         run: python scraper/discover.py
