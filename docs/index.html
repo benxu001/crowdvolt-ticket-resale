@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NYC Ticket Resale Tracker</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <header>
+    <h1>NYC Ticket Resale Tracker</h1>
+    <p class="subtitle">Hourly price tracking for New York events on CrowdVolt</p>
+  </header>
+
+  <main>
+    <!-- Event List View -->
+    <section id="event-list-view">
+      <div class="tabs">
+        <button class="tab active" data-tab="upcoming">Upcoming Events</button>
+        <button class="tab" data-tab="past">Past Events</button>
+      </div>
+      <div id="loading" class="loading">Loading events...</div>
+      <div id="upcoming-events" class="event-grid"></div>
+      <div id="past-events" class="event-grid" style="display:none;"></div>
+    </section>
+
+    <!-- Event Detail View -->
+    <section id="event-detail-view" style="display:none;">
+      <button id="back-btn" class="back-btn">&larr; Back to Events</button>
+      <div class="detail-header">
+        <h2 id="detail-title"></h2>
+        <p id="detail-meta"></p>
+        <a id="detail-link" href="#" target="_blank" class="cv-link">View on CrowdVolt</a>
+      </div>
+      <div class="time-filters">
+        <button class="filter-btn" data-range="1d">1 Day</button>
+        <button class="filter-btn" data-range="1w">1 Week</button>
+        <button class="filter-btn" data-range="1m">1 Month</button>
+        <button class="filter-btn active" data-range="all">All Time</button>
+      </div>
+      <div class="chart-container">
+        <canvas id="price-chart"></canvas>
+      </div>
+      <div id="detail-loading" class="loading" style="display:none;">Loading price data...</div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Data sourced from <a href="https://www.crowdvolt.com" target="_blank">CrowdVolt</a>. Updated hourly.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
