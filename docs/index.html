@@ -18,9 +18,14 @@
   <main>
     <!-- Event List View -->
     <section id="event-list-view">
-      <div class="tabs">
-        <button class="tab active" data-tab="upcoming">Upcoming Events</button>
-        <button class="tab" data-tab="past">Past Events</button>
+      <div class="toolbar">
+        <button class="tab active" data-tab="upcoming">Upcoming</button>
+        <button class="tab" data-tab="past">Past</button>
+        <input type="text" id="search-input" placeholder="Search events..." />
+        <div class="date-picker-wrap">
+          <input type="date" id="date-filter" class="date-filter" />
+          <button id="date-clear" class="date-clear" style="display:none;">&times;</button>
+        </div>
       </div>
       <div id="loading" class="loading">Loading events...</div>
       <div id="upcoming-events" class="event-grid"></div>

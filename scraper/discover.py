@@ -80,9 +80,12 @@ def extract_event_data(html):
     if " tickets - " in title:
         after = title.split(" tickets - ", 1)[1]
         parts = after.split(" - ")
-        venue = parts[0].strip()
         if len(parts) >= 2:
-            date_str = parts[1].replace(" | CrowdVolt", "").strip()
+            # Date is always the last part; venue is everything before it
+            date_str = parts[-1].replace(" | CrowdVolt", "").strip()
+            venue = " - ".join(parts[:-1]).strip()
+        else:
+            venue = parts[0].replace(" | CrowdVolt", "").strip()
 
     # Fallback to RSC payload for venue/date
     if not venue:

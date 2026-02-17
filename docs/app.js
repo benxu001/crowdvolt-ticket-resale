@@ -3,12 +3,12 @@
 // The anon key is safe to expose (read-only via Row-Level Security)
 // ============================================================
 const SUPABASE_URL = 'https://skoxrmbjxshqgsqhrjuy.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_HxTaprBCgty1Ivx35rxQwg_BYv40x6l';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNrb3hybWJqeHNocWdzcWhyanV5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyODg0ODAsImV4cCI6MjA4Njg2NDQ4MH0.rpHrh6SBpldn9UQhPhl8PQlZnBjAWdTVe-5El4W-VbU';
 
 // ============================================================
 // Initialize Supabase client
 // ============================================================
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ============================================================
 // State
@@ -26,6 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
   setupTabs();
   setupBackButton();
   setupTimeFilters();
+  setupSearch();
+  setupDateFilters();
 });
 
 // ============================================================
@@ -37,7 +39,7 @@ async function loadEvents() {
 
   try {
     // Fetch all events ordered by date
-    const { data: events, error } = await supabase
+    const { data: events, error } = await db
       .from('events')
       .select('*')
       .order('event_date', { ascending: true });
@@ -51,7 +53,7 @@ async function loadEvents() {
 
     if (slugs.length > 0) {
       // Fetch the latest snapshot per event (ordered desc, we pick first per slug)
-      const { data: snapshots } = await supabase
+      const { data: snapshots } = await db
         .from('snapshots')
         .select('event_slug, lowest_ask, highest_bid, timestamp')
         .eq('ticket_type', 'General Admission')
@@ -87,9 +89,48 @@ async function loadEvents() {
 // Render event lists (upcoming / past)
 // ============================================================
 function renderEventLists() {
+  const searchInput = document.getElementById('search-input');
+  const query = (searchInput?.value || '').toLowerCase();
   const now = new Date();
-  const upcoming = allEvents.filter(e => !e.event_date || new Date(e.event_date) > now);
-  const past = allEvents.filter(e => e.event_date && new Date(e.event_date) <= now).reverse();
+
+  const dateFilter = document.getElementById('date-filter')?.value || '';
+
+  const filtered = allEvents.filter(e => {
+    if (query) {
+      const match = (e.name || '').toLowerCase().includes(query)
+        || (e.venue || '').toLowerCase().includes(query)
+        || (e.slug || '').toLowerCase().includes(query);
+      if (!match) return false;
+    }
+    if (dateFilter && e.event_date) {
+      if (e.event_date.slice(0, 10) !== dateFilter) return false;
+    }
+    return true;
+  });
+
+  const sortByPriceThenName = (a, b) => {
+    // Same date group: highest ask first, then alphabetical
+    const askA = a.latest_ask || 0;
+    const askB = b.latest_ask || 0;
+    if (askB !== askA) return askB - askA;
+    return (a.name || a.slug).localeCompare(b.name || b.slug);
+  };
+
+  const upcoming = filtered.filter(e => !e.event_date || new Date(e.event_date) > now);
+  upcoming.sort((a, b) => {
+    const dateA = a.event_date || '';
+    const dateB = b.event_date || '';
+    if (dateA.slice(0, 10) !== dateB.slice(0, 10)) return dateA < dateB ? -1 : 1;
+    return sortByPriceThenName(a, b);
+  });
+
+  const past = filtered.filter(e => e.event_date && new Date(e.event_date) <= now);
+  past.sort((a, b) => {
+    const dateA = a.event_date || '';
+    const dateB = b.event_date || '';
+    if (dateA.slice(0, 10) !== dateB.slice(0, 10)) return dateB < dateA ? -1 : 1; // most recent first
+    return sortByPriceThenName(a, b);
+  });
 
   renderCards('upcoming-events', upcoming);
   renderCards('past-events', past);
@@ -154,7 +195,7 @@ async function loadPriceChart(slug, range) {
   detailLoading.style.display = 'block';
 
   try {
-    let query = supabase
+    let query = db
       .from('snapshots')
       .select('timestamp, ticket_type, lowest_ask, highest_bid')
       .eq('event_slug', slug)
@@ -339,6 +380,33 @@ function setupTimeFilters() {
   });
 }
 
+function setupSearch() {
+  const input = document.getElementById('search-input');
+  if (!input) return;
+  let debounceTimer;
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => renderEventLists(), 200);
+  });
+}
+
+function setupDateFilters() {
+  const dateInput = document.getElementById('date-filter');
+  const clearBtn = document.getElementById('date-clear');
+  if (!dateInput || !clearBtn) return;
+
+  dateInput.addEventListener('change', () => {
+    clearBtn.style.display = dateInput.value ? 'inline-block' : 'none';
+    renderEventLists();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    dateInput.value = '';
+    clearBtn.style.display = 'none';
+    renderEventLists();
+  });
+}
+
 // ============================================================
 // Helpers
 // ============================================================
@@ -354,13 +422,13 @@ function getCutoffDate(range) {
 
 function formatDate(isoStr) {
   try {
+    // Parse as UTC to avoid timezone shift (dates stored as midnight UTC)
     const d = new Date(isoStr);
     return d.toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
+      timeZone: 'UTC',
     });
   } catch {
     return isoStr;
