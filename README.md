@@ -157,6 +157,10 @@ RE_AREA = re.compile(r'\\"area_name\\":\\"([^\\]+)\\"')
 
 This approach bypasses the need for headless browser rendering. Standard HTTP requests with `requests` are used instead of Playwright, which is blocked by Cloudflare Turnstile on CrowdVolt.
 
+### Pricing Data Accuracy
+
+Prices are extracted from CrowdVolt's RSC payload summary fields (`lowest_ask_price`, `highest_bid_price`) rather than individual listing prices. These summary values may differ slightly from what CrowdVolt displays on its frontend — for example, the RSC payload might report a lowest ask of $99 while the UI shows $102 as the cheapest visible listing. The RSC data also includes ticket types like multi-day passes that CrowdVolt may not surface in its UI. Despite these minor discrepancies, the summary fields accurately capture pricing trends over time, which is the primary goal of this project.
+
 ### Rate Limiting
 
 Both scrapers include delays between requests (1.0s for discovery, 1.5s for pricing) and identify themselves with a custom User-Agent string.
