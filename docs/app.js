@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupTimeFilters();
   setupSearch();
   setupDateFilters();
+  setupVenueFilter();
 });
 
 // ============================================================
@@ -76,6 +77,7 @@ async function loadEvents() {
       latest_bid: snapshotMap[e.slug]?.highest_bid || null,
     }));
 
+    populateVenueFilter();
     renderEventLists();
   } catch (err) {
     console.error('Failed to load events:', err);
@@ -94,6 +96,7 @@ function renderEventLists() {
   const now = new Date();
 
   const dateFilter = document.getElementById('date-filter')?.value || '';
+  const venueFilter = document.getElementById('venue-filter')?.value || '';
 
   const filtered = allEvents.filter(e => {
     if (query) {
@@ -105,6 +108,7 @@ function renderEventLists() {
     if (dateFilter && e.event_date) {
       if (e.event_date.slice(0, 10) !== dateFilter) return false;
     }
+    if (venueFilter && (e.venue || '') !== venueFilter) return false;
     return true;
   });
 
@@ -388,6 +392,22 @@ function setupSearch() {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => renderEventLists(), 200);
   });
+}
+
+function populateVenueFilter() {
+  const select = document.getElementById('venue-filter');
+  if (!select) return;
+  const venues = [...new Set(allEvents.map(e => e.venue).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: 'base' })
+  );
+  select.innerHTML = '<option value="">All Venues</option>' +
+    venues.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+}
+
+function setupVenueFilter() {
+  const select = document.getElementById('venue-filter');
+  if (!select) return;
+  select.addEventListener('change', () => renderEventLists());
 }
 
 function setupDateFilters() {
