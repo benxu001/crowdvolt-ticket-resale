@@ -12,7 +12,7 @@ import os
 import re
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from playwright.sync_api import sync_playwright
 from supabase import create_client
 
@@ -32,7 +32,9 @@ def discover_events():
         )
 
         print("Navigating to CrowdVolt...")
-        page.goto(CROWDVOLT_URL, wait_until="networkidle", timeout=60000)
+        page.goto(CROWDVOLT_URL, wait_until="domcontentloaded", timeout=60000)
+        # Wait for event cards to appear on the page
+        page.wait_for_selector('a[href^="/event/"]', timeout=30000)
 
         # The homepage shows "Browse Events in New York" with city filters.
         # "New York" appears to be the default selection (underlined in screenshot).
@@ -178,7 +180,7 @@ def upsert_to_supabase(events):
 
 def main():
     print("=== CrowdVolt NYC Event Discovery ===")
-    print(f"Time: {datetime.utcnow().isoformat()}Z")
+    print(f"Time: {datetime.now(timezone.utc).isoformat()}")
 
     events = discover_events()
 
