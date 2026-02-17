@@ -61,44 +61,37 @@ def extract_pricing_from_page(html):
     """
     Extract pricing data from a CrowdVolt event page.
 
-    The page uses Next.js App Router with RSC streaming. Pricing data is
-    embedded in self.__next_f.push() calls containing serialized JSON with
-    fields like:
-      - min_ask, min_ask_qty, min_ask_type
-      - max_bid
-      - tt_data.types[].lowest_ask_price, highest_bid_price, name
+    The page uses Next.js RSC streaming with escaped JSON (\\") in the
+    payload. Pricing fields include:
+      - \\"min_ask\\", \\"max_bid\\" (top-level summary)
+      - Per-ticket-type: \\"highest_bid_price\\", \\"lowest_ask_price\\", \\"name\\"
     """
     ticket_types = {}
 
-    # Strategy 1: Find tt_data with per-ticket-type pricing in the RSC payload
-    # Look for JSON fragments containing ticket type data
-    tt_pattern = re.findall(
-        r'"name"\s*:\s*"([^"]+)"[^}]*?"lowest_ask_price"\s*:\s*(\d+(?:\.\d+)?|null)[^}]*?"highest_bid_price"\s*:\s*(\d+(?:\.\d+)?|null)',
-        html,
-    )
-    for name, ask, bid in tt_pattern:
-        ticket_types[name] = {
-            "lowest_ask": float(ask) if ask != "null" else None,
-            "highest_bid": float(bid) if bid != "null" else None,
-        }
+    # Strategy 1: Per-ticket-type pricing from the tt_data.types array
+    # Structure: \"types\":[{\"name\":\"GA\",...,\"highest_bid_price\":N,...,\"lowest_ask_price\":N,...},{...}]
+    tt_section = re.search(r'\\"types\\":\[(\{.*?\})\]', html)
+    if tt_section:
+        # Split into individual ticket type objects
+        for chunk in tt_section.group(1).split('},{'):
+            name_m = re.search(r'\\"name\\":\\"([^\\]+)\\"', chunk)
+            ask_m = re.search(r'\\"lowest_ask_price\\":(\d+(?:\.\d+)?|null)', chunk)
+            bid_m = re.search(r'\\"highest_bid_price\\":(\d+(?:\.\d+)?|null)', chunk)
 
-    # Also try reversed field order
-    tt_pattern_rev = re.findall(
-        r'"highest_bid_price"\s*:\s*(\d+(?:\.\d+)?|null)[^}]*?"lowest_ask_price"\s*:\s*(\d+(?:\.\d+)?|null)[^}]*?"name"\s*:\s*"([^"]+)"',
-        html,
-    )
-    for bid, ask, name in tt_pattern_rev:
-        if name not in ticket_types:
-            ticket_types[name] = {
-                "lowest_ask": float(ask) if ask != "null" else None,
-                "highest_bid": float(bid) if bid != "null" else None,
-            }
+            if name_m and (ask_m or bid_m):
+                name = name_m.group(1)
+                ask_val = ask_m.group(1) if ask_m else "null"
+                bid_val = bid_m.group(1) if bid_m else "null"
+                ticket_types[name] = {
+                    "lowest_ask": float(ask_val) if ask_val != "null" else None,
+                    "highest_bid": float(bid_val) if bid_val != "null" else None,
+                }
 
     # Strategy 2: Fall back to top-level min_ask / max_bid
     if not ticket_types:
-        min_ask_match = re.search(r'"min_ask"\s*:\s*(\d+(?:\.\d+)?)', html)
-        max_bid_match = re.search(r'"max_bid"\s*:\s*(\d+(?:\.\d+)?)', html)
-        min_ask_type_match = re.search(r'"min_ask_type"\s*:\s*"([^"]+)"', html)
+        min_ask_match = re.search(r'\\"min_ask\\":(\d+(?:\.\d+)?)', html)
+        max_bid_match = re.search(r'\\"max_bid\\":(\d+(?:\.\d+)?)', html)
+        min_ask_type_match = re.search(r'\\"min_ask_type\\":\\"([^\\]+)\\"', html)
 
         ticket_type_name = (
             min_ask_type_match.group(1) if min_ask_type_match else "General Admission"
@@ -112,15 +105,7 @@ def extract_pricing_from_page(html):
                 "highest_bid": highest_bid,
             }
 
-    # Also try to extract event metadata if available (for updating events table)
     metadata = {}
-    name_match = re.search(r'"event_name"\s*:\s*"([^"]+)"', html)
-    if name_match:
-        metadata["name"] = name_match.group(1)
-    venue_match = re.search(r'"venue_name"\s*:\s*"([^"]+)"', html)
-    if venue_match:
-        metadata["venue"] = venue_match.group(1)
-
     return ticket_types, metadata
 
 
