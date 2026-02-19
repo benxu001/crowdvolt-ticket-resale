@@ -1,8 +1,8 @@
 # NYC Ticket Resale Tracker
 
-A fully automated pipeline that tracks hourly resale ticket prices for New York City events on [CrowdVolt](https://www.crowdvolt.com), with a live dashboard hosted on GitHub Pages.
+A fully automated pipeline that tracks hourly resale ticket prices for New York City events on [CrowdVolt](https://www.crowdvolt.com), with a live dashboard hosted on Vercel.
 
-**[View Live Dashboard](https://benxu001.github.io/crowdvolt-ticket-resale/)**
+**[View Live Dashboard](https://crowdvolt-ticket-resale.vercel.app/)**
 
 ---
 
@@ -17,7 +17,7 @@ CrowdVolt Sitemap ──► discover.py ──► Supabase (events table)
                                             │
 CrowdVolt Event Pages ──► scrape.py ──► Supabase (snapshots table)
                                             │
-                                     GitHub Pages Dashboard
+                                     Vercel Dashboard
                                      (reads via Supabase anon key)
 ```
 
@@ -25,7 +25,7 @@ CrowdVolt Event Pages ──► scrape.py ──► Supabase (snapshots table)
 
 2. **Price Scraping** (`scrape.py`) — Runs every hour. For each active event, fetches the CrowdVolt page and extracts per-ticket-type pricing (lowest ask, highest bid) from the RSC payload. Stores each data point as a timestamped snapshot in Supabase.
 
-3. **Dashboard** (`docs/`) — A static site served via GitHub Pages. Reads directly from Supabase using the public anon key (read-only via Row-Level Security). Displays event cards with latest prices, search/filter controls, and interactive Chart.js price history charts.
+3. **Dashboard** (`docs/`) — A static site deployed on Vercel. Reads directly from Supabase using the public anon key (read-only via Row-Level Security). Displays event cards with latest prices, search/filter controls, and interactive Chart.js price history charts.
 
 ---
 
@@ -34,8 +34,7 @@ CrowdVolt Event Pages ──► scrape.py ──► Supabase (snapshots table)
 ```
 ├── .github/workflows/
 │   ├── discover.yml      # Daily event discovery (midnight EST)
-│   ├── scrape.yml        # Hourly price scraping
-│   └── pages.yml         # Deploy dashboard to GitHub Pages
+│   └── scrape.yml        # Hourly price scraping
 ├── scraper/
 │   ├── discover.py       # Event discovery script
 │   ├── scrape.py         # Price scraping script
@@ -58,7 +57,7 @@ CrowdVolt Event Pages ──► scrape.py ──► Supabase (snapshots table)
 | Scraping | Python 3.12, `requests`, regex on Next.js RSC payload |
 | Automation | GitHub Actions (cron schedules) |
 | Dashboard | Vanilla HTML/CSS/JS, [Chart.js](https://www.chartjs.org/) |
-| Hosting | GitHub Pages |
+| Hosting | [Vercel](https://vercel.com) |
 
 ---
 
@@ -91,7 +90,8 @@ CrowdVolt Event Pages ──► scrape.py ──► Supabase (snapshots table)
 ### Prerequisites
 
 - A [Supabase](https://supabase.com) project (free tier works)
-- A GitHub repository with Pages enabled
+- A [Vercel](https://vercel.com) account (free tier works)
+- A GitHub repository
 
 ### 1. Database Setup
 
@@ -115,9 +115,15 @@ const SUPABASE_URL = 'https://your-project.supabase.co';
 const SUPABASE_ANON_KEY = 'your-anon-key';
 ```
 
-### 4. Enable GitHub Pages
+### 4. Deploy Dashboard to Vercel
 
-Go to **Settings > Pages** and set the source to **GitHub Actions**.
+1. Sign up at [vercel.com](https://vercel.com) with your GitHub account
+2. Click **Add New Project** and import your repo
+3. Set **Root Directory** to `docs`
+4. Leave build command empty and output directory as `.`
+5. Click **Deploy**
+
+Vercel auto-deploys on every push to `main`.
 
 ### 5. Run the Pipelines
 
@@ -125,9 +131,8 @@ Trigger the workflows manually for the first run:
 
 1. **Actions > Discover NYC Events > Run workflow** — populates the events table
 2. **Actions > Scrape NYC Prices > Run workflow** — captures the first price snapshot
-3. **Actions > Deploy Dashboard > Run workflow** — deploys the dashboard
 
-After that, everything runs automatically on schedule.
+After that, the scrapers run automatically on schedule and Vercel deploys dashboard changes on push.
 
 ---
 
@@ -136,6 +141,7 @@ After that, everything runs automatically on schedule.
 - **Event cards** with latest ask/bid prices, sorted by date then price
 - **Search** by event name, artist, or venue
 - **Date filter** to view events on a specific date
+- **Venue filter** dropdown
 - **Upcoming / Past** tabs
 - **Interactive price charts** (Chart.js) with time range filters (1 Day, 1 Week, 1 Month, All Time)
 - **Per-ticket-type tracking** — GA shown as primary lines, other types (VIP, etc.) as dashed secondary lines
@@ -173,7 +179,7 @@ Both scrapers include delays between requests (1.0s for discovery, 1.5s for pric
 |----------|----------|-------------|
 | Discover NYC Events | `0 5 * * *` (midnight EST) | Finds new events from sitemap |
 | Scrape NYC Prices | `0 * * * *` (hourly) | Captures price snapshots |
-| Deploy Dashboard | On push to `docs/**` | Deploys updated dashboard |
+| Dashboard (Vercel) | On push to `main` | Auto-deploys via Vercel |
 
 > **Note:** GitHub Actions cron schedules may have 5-15 minute delays. Workflows are automatically disabled after 60 days of repo inactivity.
 
