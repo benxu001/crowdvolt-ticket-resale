@@ -120,7 +120,18 @@ function renderEventLists() {
     return (a.name || a.slug).localeCompare(b.name || b.slug);
   };
 
-  const upcoming = filtered.filter(e => !e.event_date || new Date(e.event_date) > now);
+  // An event moves to "past" at midnight EST the day after the event.
+  // e.g. Feb 20 event becomes past at Feb 21 00:00 EST (Feb 21 05:00 UTC)
+  function isPast(e) {
+    if (!e.event_date) return false;
+    const dateStr = e.event_date.slice(0, 10); // YYYY-MM-DD in UTC
+    // Day after event at midnight EST = day after + 05:00 UTC
+    const cutoff = new Date(dateStr + 'T05:00:00Z');
+    cutoff.setUTCDate(cutoff.getUTCDate() + 1);
+    return now >= cutoff;
+  }
+
+  const upcoming = filtered.filter(e => !isPast(e));
   upcoming.sort((a, b) => {
     const dateA = a.event_date || '';
     const dateB = b.event_date || '';
@@ -128,7 +139,7 @@ function renderEventLists() {
     return sortByPriceThenName(a, b);
   });
 
-  const past = filtered.filter(e => e.event_date && new Date(e.event_date) <= now);
+  const past = filtered.filter(e => isPast(e));
   past.sort((a, b) => {
     const dateA = a.event_date || '';
     const dateB = b.event_date || '';
@@ -214,7 +225,8 @@ async function loadPriceChart(slug, range) {
     const { data: snapshots, error } = await query;
     if (error) throw error;
 
-    renderChart(snapshots);
+    const event = allEvents.find(e => e.slug === slug);
+    renderChart(snapshots, event?.event_date);
   } catch (err) {
     console.error('Failed to load price data:', err);
   }
@@ -225,7 +237,7 @@ async function loadPriceChart(slug, range) {
 // ============================================================
 // Chart rendering
 // ============================================================
-function renderChart(snapshots) {
+function renderChart(snapshots, eventDate) {
   if (currentChart) {
     currentChart.destroy();
     currentChart = null;
@@ -301,6 +313,26 @@ function renderChart(snapshots) {
         intersect: false,
       },
       plugins: {
+        annotation: eventDate ? {
+          annotations: {
+            eventStart: {
+              type: 'line',
+              xMin: new Date(eventDate.slice(0, 10) + 'T21:00:00-05:00'),
+              xMax: new Date(eventDate.slice(0, 10) + 'T21:00:00-05:00'),
+              borderColor: '#f59e0b',
+              borderWidth: 2,
+              borderDash: [6, 3],
+              label: {
+                display: true,
+                content: 'Event Start',
+                position: 'start',
+                backgroundColor: 'rgba(245, 158, 11, 0.8)',
+                color: '#000',
+                font: { size: 11, weight: 'bold' },
+              },
+            },
+          },
+        } : {},
         legend: {
           labels: { color: '#aaa', font: { size: 12 } },
         },
