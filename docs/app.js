@@ -238,6 +238,8 @@ async function loadPriceChart(slug, range) {
 // Chart rendering
 // ============================================================
 function renderChart(snapshots, eventDate) {
+  const showEventStartLine = shouldShowEventStartLine(eventDate);
+
   if (currentChart) {
     currentChart.destroy();
     currentChart = null;
@@ -313,7 +315,7 @@ function renderChart(snapshots, eventDate) {
         intersect: false,
       },
       plugins: {
-        annotation: eventDate ? {
+        annotation: showEventStartLine ? {
           annotations: {
             eventStart: {
               type: 'line',
@@ -485,6 +487,30 @@ function formatDate(isoStr) {
   } catch {
     return isoStr;
   }
+}
+
+function shouldShowEventStartLine(eventDate) {
+  if (!eventDate) return false;
+  const eventDay = eventDate.slice(0, 10);
+  if (!eventDay) return false;
+
+  const nowNy = formatYmdInTimeZone(new Date(), 'America/New_York');
+  return eventDay === nowNy;
+}
+
+function formatYmdInTimeZone(date, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const year = parts.find(p => p.type === 'year')?.value;
+  const month = parts.find(p => p.type === 'month')?.value;
+  const day = parts.find(p => p.type === 'day')?.value;
+  if (!year || !month || !day) return null;
+  return `${year}-${month}-${day}`;
 }
 
 function escapeHtml(str) {
